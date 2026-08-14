@@ -1,0 +1,4 @@
+[
+  {"CertificateArn": "arn:aws:acm:eu-west-1:123:certificate/unused-cert", "DomainName": "unused.example.com", "InUse": false, "Status": "ISSUED"},
+  {"CertificateArn": "arn:aws:acm:eu-west-1:123:certificate/active-cert", "DomainName": "active.example.com", "InUse": true, "Status": "ISSUED"}
+]

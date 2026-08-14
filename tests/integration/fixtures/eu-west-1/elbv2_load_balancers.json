@@ -1,0 +1,3 @@
+[
+  {"LoadBalancerArn": "arn:aws:elasticloadbalancing:eu-west-1:123:loadbalancer/app/orphan-lb/abc", "LoadBalancerName": "orphan-lb", "VpcId": "vpc-abc", "Type": "application"}
+]

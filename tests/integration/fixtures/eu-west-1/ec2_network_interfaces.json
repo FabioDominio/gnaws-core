@@ -1,0 +1,4 @@
+[
+  {"NetworkInterfaceId": "eni-detached", "Status": "available", "InterfaceType": "interface", "Groups": []},
+  {"NetworkInterfaceId": "eni-used", "Status": "in-use", "InterfaceType": "interface", "Groups": [{"GroupId": "sg-used"}]}
+]

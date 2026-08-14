@@ -1,0 +1,4 @@
+[
+  {"GroupId": "sg-unused", "GroupName": "orphan-sg", "VpcId": "vpc-abc"},
+  {"GroupId": "sg-used", "GroupName": "active-sg", "VpcId": "vpc-abc"}
+]

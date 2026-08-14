@@ -1,0 +1,4 @@
+[
+  {"VolumeId": "vol-detached", "State": "available", "Size": 50, "VolumeType": "gp3"},
+  {"VolumeId": "vol-attached", "State": "in-use", "Size": 100, "VolumeType": "gp3"}
+]

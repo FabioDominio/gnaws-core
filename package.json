@@ -1,6 +1,6 @@
 {
   "name": "@gnaws/core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Core library for AWS infrastructure discovery, graph building, and unused resource detection",
   "keywords": [
     "aws",

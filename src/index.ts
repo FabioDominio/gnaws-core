@@ -17,9 +17,12 @@ export {CacheServiceFactory} from "./providers/cache/cacheServiceFactory.js";
 // Exporters
 export {CacheWriter} from "./exporters/cacheWriter.js";
 export {MarkdownExporter} from "./exporters/markdownExporter.js";
+export {CsvExporter} from "./exporters/csvExporter.js";
 export {GexfExporter} from "./exporters/gexfExporter.js";
 export {JsonExporter} from "./exporters/jsonExporter.js";
 export type {Exporter} from "./exporters/exporter.js";
+export {resourceDescriptors, nameTag, recordTags, lowerTags, flattenTags} from "./exporters/resourceDescriptors.js";
+export type {ResourceDescriptor, TagPair, ExtraColumn} from "./exporters/resourceDescriptors.js";
 
 // All interfaces
 export type * from "./interfaces/account.js";

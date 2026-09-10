@@ -12,13 +12,13 @@ The name is a double meaning: **G**raph your **AWS** — and like something gnaw
 
 ## Features
 
-- **80+ AWS services** inventoried across 430 paginated API calls
+- **81 AWS services** inventoried across 284 paginated API calls
 - **Directed resource graph** built with Graphology — relationships between all discovered resources
 - **Tags on every node** — AWS resource tags normalized as key-value pairs
 - **Unused resource detection** via structural/functional rules (tier 1 state-based + tier 2 graph-based)
 - **DNS pre-check** — skips services unavailable in each region before scanning
 - **Per-region error resilience** — timeouts or failures in one region don't crash the scan
-- **Multiple export formats**: GEXF 1.3 (Gephi), JSON (sigma.js), Markdown
+- **Multiple export formats**: GEXF 1.3 (Gephi), JSON (sigma.js), Markdown report, CSV inventory
 - **Dual-mode providers**: live AWS and offline cache (JSON dump files)
 - **Exporter interface** — pluggable architecture for adding new export formats
 
@@ -70,12 +70,20 @@ const graph = new GraphBuilder().build(inventory);
 ### Export
 
 ```typescript
-import { GexfExporter, JsonExporter, MarkdownExporter } from "@gnaws/core";
+import { GexfExporter, JsonExporter, MarkdownExporter, CsvExporter } from "@gnaws/core";
 
-new GexfExporter().export("graph.gexf", inventory, graph);   // Gephi
-new JsonExporter().export("graph.json", inventory, graph);   // sigma.js
-new MarkdownExporter().export("report.md", inventory, graph); // Markdown report
+new GexfExporter().export("graph.gexf", inventory, graph);      // Gephi
+new JsonExporter().export("graph.json", inventory, graph);      // sigma.js
+new MarkdownExporter().export("report.md", inventory, graph);   // Markdown report (one table per resource type)
+new CsvExporter().export("inventory.csv", inventory, graph);    // flat CSV inventory sheet
 ```
+
+`MarkdownExporter` and `CsvExporter` are inventory-driven and share the same
+per-service descriptor table (`exporters/descriptors/`), so they cover the same
+resource set with identical canonical resource-type keys. Markdown groups one
+table per resource type (per region) with extended per-type columns; CSV is a
+single flat sheet with columns `region,resource_type,id,name,tags`. The `graph`
+argument is optional for both.
 
 ### Dump inventory for offline use
 
@@ -139,7 +147,8 @@ src/
   inventory.ts          # Resource discovery across all regions
   graphBuilder.ts       # Two-pass directed graph (nodes, then edges)
   detection/            # Detection rules and orchestrator
-  exporters/            # GEXF, JSON, Markdown, CacheWriter
+  exporters/            # GEXF, JSON, Markdown, CSV, CacheWriter
+    descriptors/        # Shared per-service resource descriptor groups (CSV + Markdown)
   providers/
     live/               # Real AWS SDK implementations
     cache/              # Offline JSON-based implementations

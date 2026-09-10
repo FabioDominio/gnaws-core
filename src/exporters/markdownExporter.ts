@@ -1,14 +1,104 @@
 import {writeFileSync} from "node:fs";
-import type {Inventory} from "../inventory.js";
-import type {Tag, GroupIdentifier, InternetGatewayAttachment} from "@aws-sdk/client-ec2";
-import type {Tag as IamTag} from "@aws-sdk/client-iam";
 import type {DirectedGraph} from "graphology";
+import type {Inventory} from "../inventory.js";
 import type {Exporter} from "./exporter.js";
+import type {ResourceDescriptor} from "./resourceDescriptors.js";
+import {flattenTags, resourceDescriptors} from "./resourceDescriptors.js";
 
+/**
+ * Exports the inventory to a Markdown report — one table per resource type,
+ * grouped into a Global section and one section per region.
+ *
+ * Both this exporter and {@link CsvExporter} walk the same shared
+ * {@link resourceDescriptors} table, so the Markdown report covers exactly the
+ * same resource set as the CSV, with the same canonical `resourceType` keys,
+ * ids, names, and tags. The only difference is presentation: Markdown groups
+ * one table per type (per region), CSV is a single flat sheet.
+ *
+ * The graph is not required — all data comes from the inventory.
+ */
 export class MarkdownExporter implements Exporter {
 
     /**
-     * Export the resources to a .md file
+     * Escape a value for a Markdown table cell: replace pipes and collapse
+     * newlines so a single cell cannot break the table layout.
+     */
+    static #escape (value: string): string {
+
+        return value.
+            replaceAll(
+                "|",
+                "\\|"
+            ).
+            replaceAll(
+                /\r?\n/g,
+                " "
+            );
+
+    }
+
+    /**
+     * Render a single resource-type table, or "" when there are no resources.
+     * Extra columns declared by the descriptor are inserted between the Name
+     * and Tags columns; their headers come from each column's static `label`.
+     */
+    static #table<T> (
+        descriptor: ResourceDescriptor<T>,
+        inventory: Inventory,
+        resources: T[]
+    ): string {
+
+        if (resources.length === 0) {
+
+            return "";
+
+        }
+
+        const extraColumns = descriptor.columns ?? [];
+
+        let md = `#### ${descriptor.resourceType} (${String(resources.length)})\n\n`;
+
+        const headerCells = [
+            "Id",
+            "Name",
+            ...extraColumns.map((column) => MarkdownExporter.#escape(column.label)),
+            "Tags"
+        ];
+        md += `|${headerCells.join("|")}|\n`;
+        md += `|${headerCells.map(() => ":-").join("|")}|\n`;
+
+        for (const resource of resources) {
+
+            const id = descriptor.id(resource) ?? "";
+            const name = descriptor.name(resource) ?? "";
+            const tags = flattenTags(descriptor.tags?.(
+                resource,
+                inventory
+            ));
+
+            const rowCells = [
+                MarkdownExporter.#escape(id),
+                MarkdownExporter.#escape(name),
+                ...extraColumns.map((column) => MarkdownExporter.#escape(column.value(
+                    resource,
+                    inventory
+                ) ?? "")),
+                MarkdownExporter.#escape(tags)
+            ];
+            md += `|${rowCells.join("|")}|\n`;
+
+        }
+
+        return `${md}\n`;
+
+    }
+
+    /**
+     * Export the resources to a `.md` file.
+     *
+     * @param outputPath - Destination path for the `.md` file.
+     * @param inventory - Fully populated inventory.
+     * @param _graph - Unused; the report is derived entirely from the inventory.
      */
     export (outputPath: string, inventory: Inventory, _graph?: DirectedGraph): void {
 
@@ -22,165 +112,49 @@ export class MarkdownExporter implements Exporter {
 
     #generate (inventory: Inventory): string {
 
-        // Generate markdown
-        let md = "# AWS resources\n\n## Regions\n\n### Global\n\n";
-        md += "#### IAM\n\n";
-        md += "##### User groups\n\n";
-        md += "Id|Name|Creation date|\n";
-        md += "|:-|:-|:-|\n";
-        for (const group of inventory.getUserGroups()) {
+        const globals = resourceDescriptors.filter((descriptor) => descriptor.scope === "global");
+        const regionals = resourceDescriptors.filter((descriptor) => descriptor.scope === "regional");
 
-            md += `|${group.GroupId ?? ""}|${group.GroupName ?? ""}|${
-                String(group.CreateDate ?? "")}|\n`;
+        const regions = inventory.getAccountRegions().
+            map((region) => region.RegionName).
+            filter((name): name is string => Boolean(name));
 
-        }
-        md += "\n##### Users\n\n";
-        md += "Id|Name|Creation date|Password last used date|Tags|\n";
-        md += "|:-|:-|:-|:-|:-|\n";
-        for (const user of inventory.getUsers()) {
+        let md = "# AWS resources\n\n";
 
-            md += `|${user.UserId ?? ""}|${user.UserName ?? ""}|${
-                String(user.CreateDate ?? "")}|${
-                String(user.PasswordLastUsed ?? "")}|${
-                user.Tags?.map((tag: IamTag) => `${tag.Key ?? ""}: ${tag.Value ?? ""}`).join("; ") ?? ""}|\n`;
+        // ─── Global section ────────────────────────────────────────────────
+        md += "## Global\n\n";
+        for (const descriptor of globals) {
 
-        }
-        md += "\n##### Roles\n\n";
-        md += "|Id|Name|Creation date|Last used date|Tags|\n";
-        md += "|:-|:-|:-|:-|:-|\n";
-        for (const role of inventory.getRoles()) {
-
-            md += `|${role.RoleId ?? ""}|${role.RoleName ?? ""}|${
-                String(role.CreateDate ?? "")}|${
-                String(role.RoleLastUsed?.LastUsedDate ?? "")}|${
-                role.Tags?.map((tag: IamTag) => `${tag.Key ?? ""}: ${tag.Value ?? ""}`).join("; ") ?? ""}|\n`;
+            md += MarkdownExporter.#table(
+                descriptor,
+                inventory,
+                descriptor.list(
+                    inventory,
+                    ""
+                )
+            );
 
         }
-        md += "\n##### Policies\n\n";
-        md += "|Id|Name|Description|Last update|Attachment #|Tags|\n";
-        md += "|:-|:-|:-|:-|:-|:-|\n";
-        for (const policy of inventory.getPolicies()) {
 
-            md += `|${policy.PolicyId ?? ""}|${policy.PolicyName ?? ""}|${
-                policy.Description ?? ""}|${
-                String(policy.UpdateDate ?? "")}|${
-                policy.AttachmentCount?.toString() ?? ""}|${
-                policy.Tags?.map((tag: IamTag) => `${tag.Key ?? ""}: ${tag.Value ?? ""}`).join("; ") ?? ""}|\n`;
+        // ─── Per-region sections ───────────────────────────────────────────
+        for (const region of regions) {
+
+            md += `## Region ${region}\n\n`;
+            for (const descriptor of regionals) {
+
+                md += MarkdownExporter.#table(
+                    descriptor,
+                    inventory,
+                    descriptor.list(
+                        inventory,
+                        region
+                    )
+                );
+
+            }
 
         }
-        for (const region of inventory.getAccountRegions()) {
 
-            if (!region.RegionName) {
-
-                continue;
-
-            }
-
-            md += `\n### Region ${region.RegionName}\n\n`;
-            md += "#### EC2\n\n";
-            md += "##### Vpcs\n\n";
-            md += "|Id|Name|Cidr|Tags|\n";
-            md += "|:-|:-|:-|:-|\n";
-            for (const vpc of inventory.getVpcsByRegion(region.RegionName)) {
-
-                md += `|${vpc.VpcId ?? ""}|${vpc.Tags?.find((tag: Tag) => tag.Key == "Name")?.Value ?? ""
-                }|${vpc.CidrBlock ?? ""}|${
-                    vpc.Tags?.map((tag: Tag) => `${tag.Key ?? ""}: ${tag.Value ?? ""}`).join("; ") ?? ""}|\n`;
-
-            }
-            md += "\n##### Subnets\n\n";
-            md += "|Id|Name|Vpc ID|Availability zone ID|Cidr|Tags|\n";
-            md += "|:-|:-|:-|:-|:-|:-|\n";
-            for (const subnet of inventory.getSubnetsByRegion(region.RegionName)) {
-
-                md += `|${subnet.SubnetId ?? ""}|${subnet.Tags?.find((tag: Tag) => tag.Key == "Name")?.Value ?? ""
-                }|${subnet.VpcId ?? ""}|${
-                    subnet.AvailabilityZone ?? ""}|${subnet.CidrBlock ?? ""}|${
-                    subnet.Tags?.map((tag: Tag) => `${tag.Key ?? ""}: ${tag.Value ?? ""}`).join("; ") ?? ""}|\n`;
-
-            }
-            md += "\n##### Security groups\n\n";
-            md += "|Id|Name|Description|Vpc ID|Tags|\n";
-            md += "|:-|:-|:-|:-|:-|\n";
-            for (const securityGroup of inventory.getSecurityGroupsByRegion(region.RegionName)) {
-
-                md += `|${securityGroup.GroupId ?? ""}|${securityGroup.GroupName ?? ""}|${
-                    securityGroup.Description ?? ""}|${securityGroup.VpcId ?? ""}|${
-                    securityGroup.Tags?.map((tag: Tag) => `${tag.Key ?? ""}: ${
-                        tag.Value ?? ""}`).join("; ") ?? ""}|\n`;
-
-            }
-            md += "\n##### Network interfaces\n\n";
-            md += "|Id|Subnet ID|Vpc ID|Avaliability zone|Security groups|Type|Description|EC2 instance ID|Status|Public ip| Private Ip|Tags|\n";
-            md += "|:-|:-|:-|:-|:-|:-|:-|:-|:-|:-|:-|:-|\n";
-            for (const networkInterface of inventory.getNetworkInterfacesByRegion(region.RegionName)) {
-
-                md += `|${networkInterface.NetworkInterfaceId ?? ""}|${
-                    networkInterface.SubnetId ?? ""}|${
-                    networkInterface.VpcId ?? ""}|${
-                    networkInterface.AvailabilityZone ?? ""}|${
-                    networkInterface.Groups?.map((group: GroupIdentifier) => group.GroupName).join(", ") ?? ""}|${
-                    networkInterface.InterfaceType ?? ""}|${
-                    networkInterface.Description ?? ""}|${
-                    networkInterface.Attachment?.InstanceId ?? ""}|${
-                    networkInterface.Status ?? ""}|${
-                    networkInterface.Association?.PublicIp ?? ""}|${
-                    networkInterface.PrivateIpAddress ?? ""
-                }|${
-                    networkInterface.TagSet?.map((tag: Tag) => `${tag.Key ?? ""}: ${
-                        tag.Value ?? ""}`).join("; ") ?? ""}|\n`;
-
-            }
-            md += "\n##### Internet gateways\n\n";
-            md += "|Id|Vpc IDs|Tags|\n";
-            md += "|:-|:-|:-|\n";
-            for (const gateway of inventory.getInternetGatewaysByRegion(region.RegionName)) {
-
-                md += `|${gateway.InternetGatewayId ?? ""}|${
-                    gateway.Attachments?.map((attachment: InternetGatewayAttachment) => attachment.VpcId).
-                        join(", ") ?? ""}|${
-                    gateway.Tags?.map((tag: Tag) => `${tag.Key ?? ""}: ${
-                        tag.Value ?? ""}`).join("; ") ?? ""}|\n`;
-
-            }
-            md += "\n##### Egress only Internet gateways\n\n";
-            md += "|Id|Vpc IDs|Tags|\n";
-            md += "|:-|:-|:-|\n";
-            for (const gateway of inventory.getEgressOnlyInternetGatewaysByRegion(region.RegionName)) {
-
-                md += `|${gateway.EgressOnlyInternetGatewayId ?? ""}|${
-                    gateway.Attachments?.map((attachment: InternetGatewayAttachment) => attachment.VpcId).
-                        join(", ") ?? ""}|${
-                    gateway.Tags?.map((tag: Tag) => `${tag.Key ?? ""}: ${
-                        tag.Value ?? ""}`).join("; ") ?? ""}|\n`;
-
-            }
-            md += "\n##### Nat gateways\n\n";
-            md += "|Id|Type|Subnet ID|Vpc ID|Private ip|Public ip|Network interface ID|Creation time|Tags|\n";
-            md += "|:-|:-|:-|:-|:-|:-|:-|:-|:-|\n";
-            for (const gateway of inventory.getNatGatewaysByRegion(region.RegionName)) {
-
-                md += `|${gateway.NatGatewayId ?? ""}|${
-                    gateway.ConnectivityType ?? ""}|${gateway.SubnetId ?? ""}|${
-                    gateway.VpcId ?? ""}|${
-                    gateway.NatGatewayAddresses?.map((address) => address.PrivateIp).join(", ") ?? ""}|${gateway.
-                    NatGatewayAddresses?.map((address) => address.PublicIp).
-                    join(", ") ?? ""}|${gateway.
-                    NatGatewayAddresses?.map((address) => address.
-                        NetworkInterfaceId).join(", ") ?? ""}|${
-                    String(gateway.CreateTime ?? "")}|${
-                    gateway.Tags?.map((tag: Tag) => `${tag.Key ?? ""}: ${
-                        tag.Value ?? ""}`).join("; ") ?? ""}|\n`;
-
-            }
-
-            /*
-             *
-             *  const natGateways = [];
-             *  const lambdas = [];
-             */
-
-        }
         return md;
 
     }
